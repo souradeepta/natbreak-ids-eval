@@ -1,0 +1,392 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+%% --- generated macros ---
+\input{../results/macros09}
+
+%% --- theorem environments ---
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\newtheorem{definition}{Definition}
+
+% ----------------------------------------------------------------
+\begin{document}
+
+\title{NATbreak: Exploiting Enterprise Network Address Translation\\
+as a Zero-Cost Adversarial Amplifier\\
+for ML-Based Intrusion Detection}
+
+\author{
+  \IEEEauthorblockN{Souradeepta Biswas}
+  \IEEEauthorblockA{American Express Global Services\\
+  New York, NY, USA\\
+  sdb.svnit@gmail.com}
+}
+
+\maketitle
+
+% ----------------------------------------------------------------
+\begin{abstract}
+ML-based network intrusion detection systems trained on public datasets
+(CICIDS-2017, UNSW-NB15) assume routable per-host IP addresses.
+Enterprise networks deploy large-scale NAT: \SifiNEndpoints{} endpoints
+sharing \SifiNExternalIps{} external IPs at a \NatRatioLarge{}:1 ratio
+in our evaluation environment.
+This NAT topology collapses \NIPFeatures{} of \NTotalFeatures{} ML flow
+features, degrading Random Forest accuracy from \RfBaselineAcc{} (baseline)
+to \TheoremOneRfNatAcc{} under our enterprise NAT configuration.
+We introduce NATbreak—three attack variants that exploit NAT topology
+awareness (requiring no gradient access to the target model) to further
+suppress detection.
+We then propose NAT-invariant feature engineering that removes IP-dependent
+features and recovers accuracy to \InvRfAccAtSifi{} even at
+\NatRatioLarge{}:1 NAT ratio, outperforming the standard RF
+by \AccGainInvariant{} accuracy points.
+\end{abstract}
+
+\begin{IEEEkeywords}
+intrusion detection, adversarial machine learning, NAT, network traffic
+classification, feature engineering, CICIDS, UNSW-NB15
+\end{IEEEkeywords}
+
+% ----------------------------------------------------------------
+\section{Introduction}
+
+Public IDS datasets assign each host a unique IP address.
+Enterprise NAT collapses thousands of hosts to a handful of external IPs,
+destroying the IP-layer feature space that most classifiers implicitly depend
+upon.
+This is not a known adversarial technique—it is normal network infrastructure—
+but an adversary who knows the target deploys NAT (publicly inferable from port
+scan patterns~\cite{RFC3022}) can exploit this collapse as a zero-cost
+amplifier.
+
+\textbf{Contributions:}
+\begin{enumerate}
+  \item Quantification of IP entropy collapse under enterprise NAT
+    (Lemma~\ref{lem:collapse}, \S\ref{sec:collapse}).
+  \item A formal accuracy-under-NAT model (Theorem~\ref{thm:accuracy},
+    \S\ref{sec:model}).
+  \item Three NATbreak attack variants requiring only network topology knowledge,
+    no model access (\S\ref{sec:attack}).
+  \item NAT-invariant feature engineering with formal amplification bound
+    (Corollary~\ref{cor:amp}, \S\ref{sec:defense}).
+  \item Evaluation against RF, LSTM, and XGBoost on CICIDS-2017 and UNSW-NB15
+    (\S\ref{sec:eval}).
+\end{enumerate}
+
+% ----------------------------------------------------------------
+\section{Background}
+
+\subsection{IDS Datasets and IP Assumptions}
+
+CICIDS-2017~\cite{Sharafaldin2018} and UNSW-NB15~\cite{Moustafa2015} are
+the dominant evaluation benchmarks.
+Both assign unique routable IPs to each simulated host.
+Classifiers trained on these datasets learn IP-based flow attribution:
+\texttt{src\_ip}, \texttt{dst\_ip}, and derived features (geo-IP, IP pair
+uniqueness) carry significant discriminative weight.
+
+\subsection{Enterprise NAT}
+
+RFC 3022~\cite{RFC3022} describes traditional NAT: internal addresses
+(RFC 1918 space) are masqueraded behind one or more external IPs.
+At SIFI scale—\SifiNEndpoints{} internal endpoints, \SifiNExternalIps{}
+external IPs—the NAT ratio is \NatRatioLarge{}:1.
+Every flow originating from any of the \SifiNEndpoints{} hosts appears
+to originate from one of \SifiNExternalIps{} IPs.
+
+\subsection{Adversarial ML for Network IDS}
+
+Existing adversarial attacks on network IDS require gradient access~\cite{Carlini2017},
+white-box model knowledge~\cite{Goodfellow2014}, or
+problem-space constraints~\cite{Biggio2013}.
+NATbreak requires none of these: only knowledge that the target uses NAT,
+which is publicly inferable.
+
+% ----------------------------------------------------------------
+\section{The NAT Feature Collapse Problem}
+\label{sec:collapse}
+
+\subsection{Affected Features}
+
+We identify \NIPFeatures{} IP-dependent features (indices 0--2 of our
+\NTotalFeatures{}-dimensional flow feature vector):
+\texttt{src\_ip\_entropy}, \texttt{dst\_ip\_entropy},
+\texttt{ip\_pair\_uniqueness}.
+The remaining \NInvariantFeatures{} features are NAT-invariant: packet size
+distributions, inter-arrival timing, byte rate, TCP flag entropy, payload
+entropy, and port entropy.
+
+\subsection{Classifier Vulnerability}
+
+IP feature weights for the three evaluated classifiers:
+RF \RfIpWeight{}, LSTM \LstmIpWeight{}, XGBoost \XgbIpWeight{}.
+A classifier with high IP weight is vulnerable to NAT collapse;
+the NAT-invariant RF uses IP weight 0.00.
+
+\begin{lemma}[IP Entropy Collapse Under NAT]
+\label{lem:collapse}
+Let $N$ be the number of internal endpoints and $M$ the number of external
+NAT IPs.
+The maximum IP source entropy before NAT is $H_{\max}(\text{before}) = \log_2 N$.
+After NAT, $H_{\max}(\text{after}) = \log_2 M$.
+The collapse magnitude is:
+\[
+  \Delta H = \log_2 N - \log_2 M = \log_2 \frac{N}{M}.
+\]
+The collapse fraction is $\Delta H / \log_2 N$.
+At $N = \SifiNEndpoints{}$, $M = \SifiNExternalIps{}$:
+$\Delta H = \LemmaOneCollapseBits{}$~bits
+(collapse fraction \LemmaOneCollapseFrac{}).
+\end{lemma}
+
+\begin{proof}
+The source IP distribution has maximum entropy $\log_2 N$ when all $N$
+endpoints are equally likely.
+After NAT maps $N$ IPs to $M$ external IPs, the observable distribution
+has support size $M$, bounding entropy at $\log_2 M$.
+The collapse $\Delta H = \log_2(N/M)$ follows directly.
+\end{proof}
+
+Figure~\ref{fig:entropy} illustrates entropy collapse as a function of NAT
+ratio.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{../src/figures/fig3_entropy_collapse.pdf}
+  \caption{IP entropy before and after NAT (left) and collapse fraction (right)
+    as NAT ratio increases.}
+  \label{fig:entropy}
+\end{figure}
+
+% ----------------------------------------------------------------
+\section{Accuracy-Under-NAT Model}
+\label{sec:model}
+
+\begin{theorem}[Classifier Accuracy Under NAT]
+\label{thm:accuracy}
+Let $A_0$ be baseline accuracy (no NAT), $w_{ip}$ the IP feature weight
+fraction, and $r = N/M$ the NAT ratio.
+The expected accuracy under NAT is:
+\[
+  A(r) = A_0 \cdot \left(1 - w_{ip} \cdot \left(1 - \frac{1}{r}\right)\right).
+\]
+$A(r)$ is monotone non-increasing in $r$.
+As $r \to \infty$: $A \to A_0(1 - w_{ip})$.
+At $r = 1$ (no NAT): $A = A_0$.
+For RF at $r = \NatRatioLarge{}$: $A = \TheoremOneRfNatAcc{}$.
+\end{theorem}
+
+\begin{proof}
+The IP features contribute fraction $w_{ip}$ of total discriminative power.
+Under NAT ratio $r$, IP entropy collapses by factor $(1 - 1/r)$ (Lemma~\ref{lem:collapse}),
+reducing their contribution proportionally.
+The NAT-invariant features ($1 - w_{ip}$ fraction) are unaffected.
+Multiplying through gives $A(r)$ as stated.
+Monotonicity follows because $(1 - 1/r)$ is monotone increasing in $r$.
+\end{proof}
+
+Figure~\ref{fig:nat_acc} shows the model prediction and the NAT-invariant
+classifier's constant accuracy across NAT ratios.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{../src/figures/fig2_accuracy_vs_nat_ratio.pdf}
+  \caption{RF accuracy vs NAT ratio: baseline, NAT-degraded, and NAT-invariant.}
+  \label{fig:nat_acc}
+\end{figure}
+
+% ----------------------------------------------------------------
+\section{NATbreak Attack}
+\label{sec:attack}
+
+\textbf{Adversary model:} The attacker knows the target network uses NAT
+(inferred from scan patterns) but has no access to the IDS model, its weights,
+or training data.
+Attack flows originate from inside the NAT perimeter.
+
+\subsection{Type I: IP Feature Pollution}
+
+Generate a high volume of benign-looking cover flows from the same external
+NAT IP as the attack flows.
+With pollution ratio \TypeOnePollutionRatio{}:1 (cover:attack), the IP-based
+score of the attack flows is diluted toward the benign cluster.
+The IP feature contribution to the malicious score is reduced by:
+$1/(1 + \text{pollution\_ratio})$.
+
+\subsection{Type II: Flow Tuple Collision}
+
+Time attack flows to share the NAT state table entry of a legitimate
+concurrent flow.
+The IDS observes the attack flow's packet as belonging to the legitimate
+flow's 5-tuple, inheriting its benign IP features.
+Requires a \TypeTwoCollisionWindowMs{}~ms timing window.
+
+\subsection{Type III: Feature Space Saturation}
+
+Push IP feature values toward the classifier's decision boundary (0.5) using
+knowledge of the NAT ratio only.
+Saturation fraction: \TypeThreeSaturationFrac{}.
+This makes the attack flow's IP-based score ambiguous without affecting
+NAT-invariant features.
+
+Figure~\ref{fig:attacks} shows accuracy under each attack variant for all
+three classifiers.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{../src/figures/fig4_attack_by_variant.pdf}
+  \caption{Classifier accuracy under each NATbreak variant at \NatRatioLarge{}:1 NAT.}
+  \label{fig:attacks}
+\end{figure}
+
+% ----------------------------------------------------------------
+\section{NAT-Invariant Defense}
+\label{sec:defense}
+
+\subsection{Feature Engineering}
+
+Remove the \NIPFeatures{} IP-dependent features from the flow representation.
+The reduced \NInvariantFeatures{}-dimensional vector uses only:
+flow duration, packet size statistics, inter-arrival timing, byte rate,
+TCP flag entropy, payload entropy, and port entropy.
+
+\begin{corollary}[NATbreak Amplification Factor]
+\label{cor:amp}
+The adversarial amplification factor of NATbreak is $F = N/M$ (the NAT ratio).
+For a classifier with IP weight $w_{ip}$, the maximum additional accuracy
+degradation achievable by NATbreak beyond bare NAT is bounded by
+$w_{ip} \cdot (1 - 1/r)$, which scales with $F$.
+For the NAT-invariant classifier ($w_{ip} = 0$), $F = 0$:
+NATbreak provides zero amplification regardless of NAT ratio.
+At SIFI NAT ratio \NatRatioLarge{}: $F = \CorollaryOneAmpSifi{}$.
+\end{corollary}
+
+Figure~\ref{fig:invariant} compares standard RF and NAT-invariant RF under
+increasing NAT ratio and NATbreak attack.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{../src/figures/fig5_invariant_comparison.pdf}
+  \caption{Standard vs NAT-invariant RF: accuracy under NAT and NATbreak.}
+  \label{fig:invariant}
+\end{figure}
+
+% ----------------------------------------------------------------
+\section{Evaluation}
+\label{sec:eval}
+
+\subsection{Setup}
+
+Classifiers: Random Forest (\RfBaselineAcc{} baseline), LSTM
+(\LstmBaselineAcc{}), XGBoost (\XgbBaselineAcc{}), RF-NAT-Invariant
+(\InvBaselineAcc{}).
+Datasets: CICIDS-2017 (\CicidsNBenign{} benign / \CicidsNMalicious{} malicious
+flows) and UNSW-NB15 (\UnswNBenign{} / \UnswNMalicious{}).
+NAT configs: no NAT ($r=1$), small ($r=\NatRatioSmall{}$), medium
+($r=\NatRatioMedium{}$), large SIFI ($r=\NatRatioLarge{}$).
+
+\subsection{Baseline vs NAT Accuracy}
+
+Figure~\ref{fig:baseline} shows the accuracy gap between baseline and NAT
+conditions for all four classifiers at the SIFI NAT ratio.
+RF degrades from \RfBaselineAcc{} to \NatAccRF{};
+LSTM from \LstmBaselineAcc{} to \NatAccLSTM{};
+XGBoost from \XgbBaselineAcc{} to \NatAccXGBoost{}.
+The NAT-invariant RF maintains \NatAccRFNATInvariant{}, demonstrating
+immunity to NAT collapse.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{../src/figures/fig1_baseline_vs_nat.pdf}
+  \caption{Classifier accuracy: no-NAT baseline vs SIFI NAT ($r=\NatRatioLarge{}$).}
+  \label{fig:baseline}
+\end{figure}
+
+\subsection{NATbreak Attack Results}
+
+At \NatRatioLarge{}:1 NAT ratio, NATbreak Type~I further reduces RF accuracy
+to \RfAttackTypeOneAcc{}; Type~II to \RfAttackTypeTwoAcc{}; Type~III to
+\RfAttackTypeThreeAcc{}.
+The NAT-invariant RF is unaffected by all three variants.
+
+\subsection{Amplification Factor}
+
+Figure~\ref{fig:amp} shows the NATbreak amplification factor scaling
+linearly with NAT ratio, reaching $F = \AmpFactorLarge{}$ at
+SIFI scale vs $F = \AmpFactorSmall{}$ for small enterprise.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{../src/figures/fig6_amplification.pdf}
+  \caption{NATbreak amplification factor $F = N/M$ vs NAT ratio (log-log).}
+  \label{fig:amp}
+\end{figure}
+
+% ----------------------------------------------------------------
+\section{Related Work}
+
+Table~\ref{tab:related} compares NATbreak to existing adversarial IDS attacks.
+
+\begin{table}[!t]
+  \centering
+  \caption{Adversarial IDS Attack Comparison}
+  \label{tab:related}
+  \begin{tabular}{lccc}
+    \toprule
+    Attack & Model Access & NAT Aware & Zero Cost \\
+    \midrule
+    FGSM~\cite{Goodfellow2014} & Gradient & -- & -- \\
+    C\&W~\cite{Carlini2017} & White-box & -- & -- \\
+    Biggio~\cite{Biggio2013} & White-box & -- & -- \\
+    NATbreak (ours) & None & \checkmark & \checkmark \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{Dataset bias:} Sommer and Paxson~\cite{Sommer2010} identified the
+dataset-deployment gap as a fundamental IDS challenge.
+Our work identifies NAT as a specific, quantifiable, and exploitable
+instance of this gap.
+\textbf{Evasion attacks:} Rigaki and Garcia~\cite{Rigaki2018} and
+Rosenberg et al.~\cite{Rosenberg2021} demonstrate evasion with GAN-generated
+and query-based attacks respectively; both require model interaction.
+\textbf{Feature selection:} Buczak and Guven~\cite{Buczak2016} survey
+feature engineering for IDS without addressing NAT invariance.
+
+% ----------------------------------------------------------------
+\section{Limitations and Future Work}
+
+Theorem~\ref{thm:accuracy} models accuracy as linear in the IP collapse term.
+Real classifiers may exhibit non-linear interactions between IP and invariant
+features; calibrating the model against Snort~\cite{Snort} and
+Suricata~\cite{Suricata} rule engines is future work.
+Type~II (tuple collision) depends on timing precision; success probability
+as a function of connection rate is not modeled here.
+Extending NATbreak to IPv6 environments with NAT64 and CLAT translation
+layers is a natural extension.
+
+% ----------------------------------------------------------------
+\section{Conclusion}
+
+Enterprise NAT is a ubiquitous structural property that collapses
+\LemmaOneCollapseBits{}~bits of IP entropy at SIFI scale and degrades
+standard RF IDS accuracy from \RfBaselineAcc{} to \TheoremOneRfNatAcc{}.
+NATbreak exploits this collapse as a zero-cost adversarial amplifier—
+no model access required—further suppressing detection.
+NAT-invariant feature engineering eliminates the IP dependency, recovering
+\InvRfAccAtSifi{} accuracy at \NatRatioLarge{}:1 NAT ratio and rendering
+NATbreak ineffective.
+
+% ----------------------------------------------------------------
+\bibliographystyle{IEEEtran}
+\bibliography{paper09}
+
+\end{document}

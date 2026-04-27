@@ -41,7 +41,7 @@ in our evaluation environment.
 This NAT topology collapses \NIPFeatures{} of \NTotalFeatures{} ML flow
 features, degrading Random Forest accuracy from \RfBaselineAcc{} (baseline)
 to \TheoremOneRfNatAcc{} under our enterprise NAT configuration.
-We introduce NATbreak—three attack variants that exploit NAT topology
+We introduce NATbreak---three attack variants that exploit NAT topology
 awareness (requiring no gradient access to the target model) to further
 suppress detection.
 We then propose NAT-invariant feature engineering that removes IP-dependent
@@ -62,7 +62,7 @@ Public IDS datasets assign each host a unique IP address.
 Enterprise NAT collapses thousands of hosts to a handful of external IPs,
 destroying the IP-layer feature space that most classifiers implicitly depend
 upon.
-This is not a known adversarial technique—it is normal network infrastructure—
+This is not a known adversarial technique---it is normal network infrastructure---
 but an adversary who knows the target deploys NAT (publicly inferable from port
 scan patterns~\cite{RFC3022}) can exploit this collapse as a zero-cost
 amplifier.
@@ -97,8 +97,8 @@ uniqueness) carry significant discriminative weight.
 
 RFC 3022~\cite{RFC3022} describes traditional NAT: internal addresses
 (RFC 1918 space) are masqueraded behind one or more external IPs.
-At SIFI scale—\SifiNEndpoints{} internal endpoints, \SifiNExternalIps{}
-external IPs—the NAT ratio is \NatRatioLarge{}:1.
+At SIFI scale---\SifiNEndpoints{} internal endpoints, \SifiNExternalIps{}
+external IPs---the NAT ratio is \NatRatioLarge{}:1.
 Every flow originating from any of the \SifiNEndpoints{} hosts appears
 to originate from one of \SifiNExternalIps{} IPs.
 
@@ -310,6 +310,21 @@ immunity to NAT collapse.
   \label{fig:baseline}
 \end{figure}
 
+\begin{table}[!t]
+  \centering
+  \caption{Classifier Accuracy: Baseline vs.\ NAT-Degraded vs.\ NAT-Invariant}
+  \label{tab:accuracy}
+  \begin{tabular}{lccc}
+    \toprule
+    Classifier & Baseline & Under NAT & NAT-Invariant \\
+    \midrule
+    Random Forest      & \BaselineAccRF{}           & \NatAccRF{}           & \NatAccRFNATInvariant{} \\
+    LSTM               & \BaselineAccLSTM{}          & \NatAccLSTM{}         & --- \\
+    XGBoost            & \BaselineAccXGBoost{}       & \NatAccXGBoost{}      & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \subsection{NATbreak Attack Results}
 
 At \NatRatioLarge{}:1 NAT ratio, NATbreak Type~I further reduces RF accuracy
@@ -361,6 +376,22 @@ and query-based attacks respectively; both require model interaction.
 \textbf{Feature selection:} Buczak and Guven~\cite{Buczak2016} survey
 feature engineering for IDS without addressing NAT invariance.
 
+\begin{table}[!t]
+  \centering
+  \caption{NAT Ratio Sensitivity: RF Accuracy vs.\ NAT Scale}
+  \label{tab:sensitivity}
+  \begin{tabular}{lccc}
+    \toprule
+    NAT Ratio & Standard RF & NAT-Invariant RF \\
+    \midrule
+    $10$:$1$     & \RfAccAtRatioTen{}     & --- \\
+    $100$:$1$    & \RfAccAtRatioHundred{} & --- \\
+    $1000$:$1$   & \RfAccAtRatioThousand{} & \InvAccAtRatioThousand{} \\
+    $\NatRatioLarge{}$:$1$ (SIFI) & \StdRfAccAtSifi{} & \InvRfAccAtSifi{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 % ----------------------------------------------------------------
 \section{Limitations and Future Work}
 
@@ -379,8 +410,8 @@ layers is a natural extension.
 Enterprise NAT is a ubiquitous structural property that collapses
 \LemmaOneCollapseBits{}~bits of IP entropy at SIFI scale and degrades
 standard RF IDS accuracy from \RfBaselineAcc{} to \TheoremOneRfNatAcc{}.
-NATbreak exploits this collapse as a zero-cost adversarial amplifier—
-no model access required—further suppressing detection.
+NATbreak exploits this collapse as a zero-cost adversarial amplifier---
+no model access required---further suppressing detection.
 NAT-invariant feature engineering eliminates the IP dependency, recovering
 \InvRfAccAtSifi{} accuracy at \NatRatioLarge{}:1 NAT ratio and rendering
 NATbreak ineffective.
